@@ -1,0 +1,9 @@
+﻿  t.c
+c:\users\administrator\desktop\test\myrsa\myrsa\t.c(156): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+  d:\windows kits\10\include\10.0.17763.0\ucrt\stdio.h(208): note: 参见“fopen”的声明
+  正在生成代码
+  1 of 1 functions (100.0%) were compiled.
+    0 functions were new in current compilation
+    0 functions had inline decision re-evaluated but remain unchanged
+  已完成代码的生成
+  myRSA.vcxproj -> C:\Users\Administrator\Desktop\Test\myRSA\Release\myRSA.exe
