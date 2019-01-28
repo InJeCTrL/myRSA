@@ -9,11 +9,13 @@
 #include<stdio.h>
 #include<string.h>
 #include<io.h>
+#include<direct.h>
 #include<openssl/pem.h>
 #include<openssl/rsa.h>
 #include<openssl/applink.c>
 #define PubKeyFileName "RSA_Public"	//公钥文件名(必须含有Public)
 #define PriKeyFileName "RSA_Private"//私钥文件名(必须含有Private)
+#define myRSATempFileName "myrsaTemp.rsatmp"//加密、解密时创建的临时文件名
 #define KeyBit 2048	//密钥位数
 #define E 65537	//E
 #define RSAsize (KeyBit / 8)//密文长度
@@ -27,6 +29,7 @@ int ShowHelp(void)
 	printf("-pubd(DIRs):公钥 解密文件/递归解密整个目录\n");
 	printf("-prie(DIRs):私钥 加密文件/递归加密整个目录\n");
 	printf("-prid(DIRs):私钥 解密文件/递归解密整个目录\n");
+	printf("公钥加密-私钥解密 / 私钥加密-公钥解密\n");
 	printf("请不要对大文件执行加密/解密操作\n使用公钥或私钥时请将公钥文件或私钥文件与本程序置于同一目录下！\n");
 	printf("!!!加密解密过程中请不要退出程序，避免数据丢失!!!\n");
 	return 0;
@@ -103,23 +106,27 @@ int EnSingleFile(char *FilePath, RSA *memRSA, int Type)
 	unsigned char buf_Result[RSAsize] = { 0 };//加密结果缓冲区
 	unsigned char FileName[FILENAME_MAX] = { 0 };//文件名
 	long FileSize;//文件字节数
+	int tSize;//分块读取的单块字节数
 	char *pstr = NULL;//指向文件名字符串
-	FILE *fp = NULL;
+	FILE *fp = NULL, *fpW = NULL;//原文件指针、加密文件指针
 
 	strcpy(FileName, (pstr = strrchr(FilePath, '\\')) ? pstr+1 : FilePath);//获取文件名
 	fp = fopen(FilePath, "rb");
 	FileSize = filelength(fileno(fp));//获取文件字节数
+	fpW = fopen(myRSATempFileName, "wb");//本程序目录下创建临时文件
 	printf("--[%s] [%ld 字节] 加密...", FileName, FileSize);
-	fread(buf_File, 1, FileSize, fp);//读取文件内容到缓冲区
-	if (!Type)//将buf_File中的内容加密放入buf_Result
-		RSA_public_encrypt(FileSize, buf_File, buf_Result, memRSA, RSA_PKCS1_PADDING);
-	else
-		RSA_private_encrypt(FileSize, buf_File, buf_Result, memRSA, RSA_PKCS1_PADDING);
+	while ((tSize = fread(buf_File, 1, RSA_In_Size, fp)) > 0)
+	{//分块读取单次RSA加密可以接受的最大字节数到缓冲区
+		if (!Type)//将buf_File中的内容加密放入buf_Result
+			RSA_public_encrypt(tSize, buf_File, buf_Result, memRSA, RSA_PKCS1_PADDING);
+		else
+			RSA_private_encrypt(tSize, buf_File, buf_Result, memRSA, RSA_PKCS1_PADDING);
+		fwrite(buf_Result, 1, RSAsize, fpW);//向临时文件写入密文
+	}
 	fclose(fp);
-
-	fp = fopen(FilePath, "wb");
-	fwrite(buf_Result, 1, RSAsize, fp);//覆盖写入密文
-	fclose(fp);
+	fclose(fpW);
+	remove(FilePath);//删除明文
+	rename(myRSATempFileName, FilePath);//覆盖为密文
 	printf("OK\n");
 
 	return 0;
@@ -130,23 +137,27 @@ int DeSingleFile(char *FilePath, RSA *memRSA, int Type)
 	unsigned char buf_Result[RSAsize] = { 0 };//解密结果缓冲区
 	unsigned char FileName[FILENAME_MAX] = { 0 };//文件名
 	long FileSize;//文件字节数
+	int tSize;//分块读取的单块字节数
 	char *pstr = NULL;//指向文件名字符串
-	FILE *fp = NULL;
+	FILE *fp = NULL, *fpW = NULL;//原文件指针、加密文件指针
 
 	strcpy(FileName, (pstr = strrchr(FilePath, '\\')) ? pstr + 1 : FilePath);//获取文件名
 	fp = fopen(FilePath, "rb");
 	FileSize = filelength(fileno(fp));//获取文件字节数
+	fpW = fopen(myRSATempFileName, "wb");//本程序目录下创建临时文件
 	printf("--[%s] [%ld 字节] 解密...", FileName, FileSize);
-	fread(buf_File, 1, FileSize, fp);//读取文件内容到缓冲区
-	if (!Type)//将buf_File中的内容解密放入buf_Result
-		RSA_public_decrypt(FileSize, buf_File, buf_Result, memRSA, RSA_PKCS1_PADDING);
-	else
-		RSA_private_decrypt(FileSize, buf_File, buf_Result, memRSA, RSA_PKCS1_PADDING);
+	while ((tSize = fread(buf_File, 1, RSAsize, fp)) > 0)
+	{//分块读取单次RSA解密可以接受的最大字节数到缓冲区
+		if (!Type)//将buf_File中的内容解密放入buf_Result
+			tSize = RSA_public_decrypt(tSize, buf_File, buf_Result, memRSA, RSA_PKCS1_PADDING);
+		else
+			tSize = RSA_private_decrypt(tSize, buf_File, buf_Result, memRSA, RSA_PKCS1_PADDING);
+		fwrite(buf_Result, 1, tSize, fpW);//向临时文件写入明文
+	}
 	fclose(fp);
-
-	fp = fopen(FilePath, "wb");
-	fwrite(buf_Result, 1, strlen(buf_Result), fp);//覆盖写入明文
-	fclose(fp);
+	fclose(fpW);
+	remove(FilePath);//删除密文
+	rename(myRSATempFileName, FilePath);//覆盖为明文
 	printf("OK\n");
 
 	return 0;
@@ -238,15 +249,6 @@ int UseKey(char *Path[], int KeyType, int Type, int n)
 
 int main(int argc,char *argv[])
 {
-	/*int argc;
-	char *argv[3] = { 0 };
-	argv[0] = (char*)malloc(1000 * sizeof(char));
-	argv[1] = (char*)malloc(1000 * sizeof(char));
-	argv[2] = (char*)malloc(1000 * sizeof(char));
-	argc = 3;
-	strcpy(argv[0], "C:\Users\Administrator\Desktop\Test\myRSA\Debug\myRSA.exe");
-	strcpy(argv[1], "-prid");
-	strcpy(argv[2], "C:\\Users\\Administrator\\Desktop\\ss");*/
 	if (argc == 1)
 		ShowHelp();//空参数
 	else
@@ -264,6 +266,6 @@ int main(int argc,char *argv[])
 		else
 			ShowHelp();//无效输入
 	}
-	//system("pause");
+	
 	return 0;
 }
